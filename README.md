@@ -31,7 +31,7 @@ Install:
 pip install -r requirements.txt
 ```
   
-A tool for compressing and decompressing data in "Sonic Riders" games for PC and Xbox  
+A tool for compressing and decompressing data in "Sonic Riders" games for PC and Xbox. Tool usually compress slightly more efficient, than original packer.  
 Compression format description:  
 ```
 0x80 bytes compressed file header:
