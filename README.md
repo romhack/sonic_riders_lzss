@@ -16,6 +16,7 @@ sonic_riders_lzss.py unpack [OPTIONS] IN_NAME
 
 Options:
   -o, --out_name TEXT  Output plain file name.
+  --gamecube           Flag for GameCube input file format.
 
 sonic_riders_lzss.py pack [OPTIONS] IN_NAME
 
@@ -24,6 +25,7 @@ sonic_riders_lzss.py pack [OPTIONS] IN_NAME
 
 Options:
   -o, --out_name TEXT  Output packed file name.
+  --gamecube           Flag for GameCube output file format.
 ```
 
 Install:
@@ -31,7 +33,8 @@ Install:
 pip install -r requirements.txt
 ```
   
-A tool for compressing and decompressing data in "Sonic Riders" games for PC and Xbox. Tool usually compress slightly more efficient, than original packer.  
+A tool for compressing and decompressing data in "Sonic Riders" game for PC, Xbox and GameCube versions. See additional usage examples in .bat files.  
+Tool usually compress slightly more efficient, than original packer.  
 Compression format description:  
 ```
 0x80 bytes compressed file header:

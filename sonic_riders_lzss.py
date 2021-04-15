@@ -3,7 +3,8 @@
 '''
 sonic_riders_lzss
 
-A tool for compressing and decompressing data in "Sonic Riders" games for PC and Xbox
+A tool for compressing and decompressing data in "Sonic Riders" game
+for PC, Xbox and GameCube versions
 
 Version:   0.9
 Author:    Griever
@@ -27,28 +28,32 @@ class LzEntry(NamedTuple):
 
 
 COMPRESSED_FILE_SIGNATURE = 0x80000001
-HEADER_SIZE = 0x80  # compress header is 0x80 bytes
+# HEADER_SIZE = 0x80  # compress header is 0x80 bytes
 MAX_OFFSET = 0xFF  # lz offset is encoded with 8 bits
 MAX_LEN = 0xFF  # lz length is encoded with 8 bits
 
 
-def deserialize(stream):
+def deserialize(stream, gamecube_flag):
     '''
     Deserialize given bits stream to list of compress commands entries
     Parameters
     ----------
     stream : ConstBitStream
         input bits stream, read from compressed file
+    gamecube_flag: Bool
+        flags that user unpacks gamecube version file
 
     Returns
     -------
     entries : list of RawEntries or LzEntries
     '''
-    file_flag = stream.read('uintle:32')
+    file_flag = stream.read(
+        'uintbe:32') if gamecube_flag else stream.read('uintle:32')
     assert file_flag == COMPRESSED_FILE_SIGNATURE, "File compressed flag not found, aborted!"
-    plain_size = stream.read('uintle:32')
+    plain_size = stream.read(
+        'uintbe:32') if gamecube_flag else stream.read('uintle:32')
     assert plain_size > 0, "Plain size is found zero, aborted!"
-    stream.bytepos = HEADER_SIZE
+    stream.bytepos = 0x20 if gamecube_flag else 0x80
     entries = []
     plain_pos = 0
 
@@ -146,22 +151,27 @@ def encode(lst):
     '''
     pos = 0
     encoded = []
-    while pos < len(lst):
-        entry = find_lz(lst, pos)
-        if entry is None:  # no lz matches found, emit raw
-            encoded.append(RawEntry(lst[pos]))
-            pos += 1
-
-        else:  # lz match found, check if lazy parsing is more efficient:
-            skip_entry = find_lz(lst, pos + 1)
-            if isinstance(skip_entry, LzEntry) and skip_entry.length > entry.length:
-                # dump raw + skip entry match
+    with click.progressbar(length=len(lst),
+                           label='Encoding (1/2)') as bar:
+        while pos < len(lst):
+            entry = find_lz(lst, pos)
+            if entry is None:  # no lz matches found, emit raw
                 encoded.append(RawEntry(lst[pos]))
-                encoded.append(skip_entry)
-                pos += skip_entry.length + 1
-            else:  # current lz match is most efficient, emit it
-                encoded.append(entry)
-                pos += entry.length
+                pos += 1
+                bar.update(1)
+
+            else:  # lz match found, check if lazy parsing is more efficient:
+                skip_entry = find_lz(lst, pos + 1)
+                if isinstance(skip_entry, LzEntry) and skip_entry.length > entry.length:
+                    # dump raw + skip entry match
+                    encoded.append(RawEntry(lst[pos]))
+                    encoded.append(skip_entry)
+                    pos += skip_entry.length + 1
+                    bar.update(skip_entry.length + 1)
+                else:  # current lz match is most efficient, emit it
+                    encoded.append(entry)
+                    pos += entry.length
+                    bar.update(entry.length)
 
     return encoded
 
@@ -181,18 +191,21 @@ def serialize(commands):
 
     '''
     stream = Bits()
-    for command in commands:
-        if isinstance(command, RawEntry):  # serialize raw
-            stream += pack('bool, uint:8', False, command.value)
-        else:  # serialize lz
-            stream += pack('bool, uint:8, uint:8', True,
-                           command.distance, command.length)
+    with click.progressbar(commands,
+                           label='Serializing (2/2)',
+                           length=len(commands)) as bar:
+        for command in bar:
+            if isinstance(command, RawEntry):  # serialize raw
+                stream += pack('bool, uint:8', False, command.value)
+            else:  # serialize lz
+                stream += pack('bool, uint:8, uint:8', True,
+                               command.distance, command.length)
     return stream
 
 
 @click.group()
 def cli():
-    """A tool for compressing and decompressing data for Sonic Rider games.
+    """A tool for compressing and decompressing data for Sonic Rider game.
     """
     pass
 
@@ -200,13 +213,14 @@ def cli():
 @cli.command(name='unpack', short_help='decompress file')
 @click.argument('in_name')
 @click.option('--out_name', '-o', default='decompressed.bin', help='Output plain file name.')
-def decompress_file(in_name, out_name):
+@click.option('--gamecube', is_flag=True, help='Flag for GameCube input file format.')
+def decompress_file(in_name, out_name, gamecube):
     """Decompress given IN_NAME packed file.
     Output file name can be provided, otherwise default 'decompressed.bin' will be used.
 
     """
     packed_stream = ConstBitStream(filename=in_name)
-    entries = deserialize(packed_stream)
+    entries = deserialize(packed_stream, gamecube)
     buf = decode(entries)
     with open(out_name, "wb") as decoded_file:
         decoded_file.write(bytes(buf))
@@ -215,7 +229,8 @@ def decompress_file(in_name, out_name):
 @cli.command(name='pack', short_help='compress file')
 @click.argument('in_name')
 @click.option('--out_name', '-o', default='compressed.bin', help='Output packed file name.')
-def compress_file(in_name, out_name):
+@click.option('--gamecube', is_flag=True, help='Flag for GameCube output file format.')
+def compress_file(in_name, out_name, gamecube):
     """Compress plain IN_NAME file.
     Output file name can be provided, otherwise default 'compressed.bin' will be used.
 
@@ -225,8 +240,12 @@ def compress_file(in_name, out_name):
     encoded = encode(plain)
     serialized = serialize(encoded)
     # write compression signature, size and zeroes up to 0x80 offset
-    header = pack('uintle:32, uintle:32', COMPRESSED_FILE_SIGNATURE,
-                  len(plain)) + Bits([0]*8*(HEADER_SIZE-8))
+    if gamecube:
+        header = pack('uintbe:32, uintbe:32', COMPRESSED_FILE_SIGNATURE,
+                      len(plain)) + Bits([0]*8*(0x20-8))
+    else:
+        header = pack('uintle:32, uintle:32', COMPRESSED_FILE_SIGNATURE,
+                      len(plain)) + Bits([0]*8*(0x80-8))
     full_stream = header + serialized
     with open(out_name, 'wb') as encoded_file:
         full_stream.tofile(encoded_file)
